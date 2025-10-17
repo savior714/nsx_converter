@@ -104,8 +104,8 @@ HTML 추출 및 경로 수정 → .html 파일 생성
 - **특징**: 명령줄에서 실행, 서버 환경에 적합
 
 ### 3. Tkinter GUI 버전
-- **파일**: `nsx_to_markdown.py`
-- **실행**: `python nsx_to_markdown.py`
+- **파일**: `nsx_to_html.py`
+- **실행**: `python nsx_to_html.py`
 - **특징**: 데스크톱 GUI 애플리케이션
 
 ## ⚠️ 주의사항
