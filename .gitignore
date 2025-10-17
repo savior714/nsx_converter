@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+venv/
+env/
+ENV/
+
+# 변환 결과 폴더
+converted_notes/
+converted_notes_*/
+test_copy_output/
+
+# 압축 파일
+*.zip
+*.nxs
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# 기타 임시 파일
+tmp/
+temp/
+*.tmp
+

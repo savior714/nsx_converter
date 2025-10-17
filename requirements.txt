@@ -1,0 +1,16 @@
+# Synology Note Station to Markdown Converter
+# Python 3.7 이상 필요
+
+# 기본 라이브러리만 사용 (추가 설치 불필요)
+# - tkinter (Python 기본 포함)
+# - zipfile (Python 기본 포함)
+# - json (Python 기본 포함)
+
+# 외부 프로그램 필요 (선택사항):
+# - Pandoc (https://pandoc.org/installing.html)
+#   Markdown 변환을 위해 권장되지만 필수는 아님
+#   없으면 HTML 파일로 저장됨
+
+
+
+
