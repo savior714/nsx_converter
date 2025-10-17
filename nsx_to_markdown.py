@@ -1,6 +1,5 @@
 import os
 import json
-import subprocess
 import zipfile
 import shutil
 import tkinter as tk
@@ -8,12 +7,13 @@ from tkinter import filedialog, messagebox, scrolledtext, ttk
 from pathlib import Path
 from threading import Thread
 import tempfile
+import re
 
 
 class NsxConverterGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Synology Note Station → Markdown 변환기")
+        self.root.title("Synology Note Station → HTML 변환기")
         self.root.geometry("700x500")
         self.root.resizable(True, True)
         
@@ -99,19 +99,54 @@ class NsxConverterGUI:
         if dir_path:
             self.output_entry.delete(0, tk.END)
             self.output_entry.insert(0, dir_path)
+    
+    def fix_image_paths(self, html_content, attachments=None):
+        """HTML 내의 이미지 경로를 실제 파일명으로 수정"""
+        if not attachments:
+            return html_content
+        
+        # ref -> 파일명 매핑 생성
+        ref_to_filename = {}
+        for att_id, att_info in attachments.items():
+            # 이미지 파일 확인 - type 필드 또는 파일 확장자로 확인
+            att_type = att_info.get('type', '').lower()
+            att_name = att_info.get('name', '').lower()
             
-    def check_pandoc(self):
-        """Pandoc 설치 확인"""
-        try:
-            result = subprocess.run(
-                ["pandoc", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+            # image/ 로 시작하는 타입이거나, 이미지 확장자를 가진 경우
+            is_image = (att_type.startswith('image/') or 
+                       att_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')))
+            
+            if is_image:
+                ref = att_info.get('ref', '')
+                name = att_info.get('name', '')
+                if ref and name:
+                    ref_to_filename[ref] = name
+        
+        # ref 속성이 있는 img 태그를 찾아서 src 수정
+        def replace_img(match):
+            full_tag = match.group(0)
+            
+            # ref 속성 찾기
+            ref_match = re.search(r'ref="([^"]+)"', full_tag)
+            if ref_match:
+                ref_value = ref_match.group(1)
+                if ref_value in ref_to_filename:
+                    # src를 실제 이미지 경로로 교체
+                    filename = ref_to_filename[ref_value]
+                    new_src = f'webman/3rdparty/NoteStation/images/{filename}'
+                    # src 속성 교체
+                    full_tag = re.sub(
+                        r'src="[^"]*"',
+                        f'src="{new_src}"',
+                        full_tag
+                    )
+            
+            return full_tag
+        
+        # img 태그 전체를 찾아서 교체
+        html_content = re.sub(r'<img[^>]*>', replace_img, html_content)
+        
+        return html_content
             
     def sanitize_filename(self, name: str) -> str:
         """파일 이름으로 쓸 수 없는 문자 제거"""
@@ -136,17 +171,6 @@ class NsxConverterGUI:
         if not output_path:
             messagebox.showerror("오류", "출력 폴더를 지정해주세요.")
             return
-            
-        # Pandoc 확인
-        if not self.check_pandoc():
-            response = messagebox.askyesno(
-                "Pandoc 미설치",
-                "Pandoc이 설치되어 있지 않거나 PATH에 등록되지 않았습니다.\n"
-                "HTML 그대로 저장하시겠습니까?\n\n"
-                "(Pandoc 설치: https://pandoc.org/installing.html)"
-            )
-            if not response:
-                return
                 
         # 별도 스레드에서 변환 실행
         self.is_running = True
@@ -177,86 +201,138 @@ class NsxConverterGUI:
             with zipfile.ZipFile(nsx_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
                 
-            self.log(f"✅ 압축 해제 완료: {temp_dir}")
+            self.log(f"✅ 압축 해제 완료")
             
-            # Pandoc 사용 가능 여부
-            use_pandoc = self.check_pandoc()
-            if use_pandoc:
-                self.log("\n✅ Pandoc 발견 - Markdown으로 변환합니다.")
+            # 이미지 폴더 구조 생성
+            images_dir = output_dir / "webman" / "3rdparty" / "NoteStation" / "images"
+            images_dir.mkdir(parents=True, exist_ok=True)
+            
+            # 이미지-md5 매핑 수집 (같은 MD5에 여러 파일명 지원)
+            image_mapping = {}  # {md5: [names]}
+            image_count = 0
+            
+            self.log("\n🖼️ 이미지 정보 수집 중...")
+            
+            # 모든 노트 파일에서 attachment 정보 수집
+            for folder, _, files in os.walk(temp_dir):
+                for file in files:
+                    file_path = Path(folder) / file
+                    # 확장자 없는 파일만 확인 (file_로 시작하는 것 제외)
+                    if file_path.suffix == "" and not file_path.name.startswith('file_'):
+                        try:
+                            text = file_path.read_text(encoding="utf-8", errors="ignore")
+                            # JSON 파일인지 확인
+                            if not text.strip().startswith('{'):
+                                continue
+                            
+                            data = json.loads(text)
+                            # category가 note인 것만 처리
+                            if data.get('category') != 'note':
+                                continue
+                            
+                            attachments = data.get("attachment", {})
+                            if not attachments:
+                                continue
+                            
+                            for att_id, att_info in attachments.items():
+                                # 이미지 파일 확인 - type 필드 또는 파일 확장자로 확인
+                                att_type = att_info.get('type', '').lower()
+                                att_name = att_info.get('name', '').lower()
+                                
+                                # image/ 로 시작하는 타입이거나, 이미지 확장자를 가진 경우
+                                is_image = (att_type.startswith('image/') or 
+                                           att_name.endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg')))
+                                
+                                if is_image:
+                                    md5 = att_info.get('md5')
+                                    name = att_info.get('name', 'unknown')
+                                    if md5 and name:
+                                        if md5 not in image_mapping:
+                                            image_mapping[md5] = []
+                                        # 중복 방지
+                                        if name not in image_mapping[md5]:
+                                            image_mapping[md5].append(name)
+                        except:
+                            continue
+            
+            total_images = sum(len(names) for names in image_mapping.values())
+            self.log(f"📊 {total_images}개의 이미지 정보 수집 완료 (고유 MD5: {len(image_mapping)}개)")
+            
+            # file_<md5> 파일들을 모든 이미지 이름으로 복사
+            self.log("📁 이미지 파일 복사 중...")
+            for folder, _, files in os.walk(temp_dir):
+                for file in files:
+                    if file.startswith('file_'):
+                        md5_hash = file.replace('file_', '')
+                        if md5_hash in image_mapping:
+                            source_file = Path(folder) / file
+                            
+                            # 같은 MD5를 가진 모든 파일명으로 복사
+                            for name in image_mapping[md5_hash]:
+                                target_file = images_dir / name
+                                
+                                try:
+                                    shutil.copy2(source_file, target_file)
+                                    image_count += 1
+                                except Exception as e:
+                                    self.log(f"⚠️ 이미지 복사 실패: {name}")
+            
+            if image_count > 0:
+                self.log(f"✅ {image_count}개 이미지 파일 복사 완료")
             else:
-                self.log("\n⚠️  Pandoc 없음 - HTML 파일로 저장합니다.")
+                self.log("ℹ️ 이미지 파일이 없습니다")
             
             # 노트 파일 찾기 및 변환
             note_count = 0
             error_count = 0
             
-            self.log("\n🔍 노트 파일 검색 중...\n")
+            self.log("\n🔍 노트 파일 검색 및 변환 중...\n")
             
             for folder, _, files in os.walk(temp_dir):
                 for file in files:
                     file_path = Path(folder) / file
                     
-                    # 확장자 없는 파일만 처리 (Note Station 포맷)
-                    if file_path.suffix == "":
+                    # 확장자 없는 파일만 확인 (file_로 시작하는 것 제외)
+                    if file_path.suffix == "" and not file_path.name.startswith('file_'):
                         try:
                             text = file_path.read_text(encoding="utf-8", errors="ignore")
                             
-                            # JSON 형식 확인
+                            # JSON 파일인지 확인
+                            if not text.strip().startswith('{'):
+                                continue
+                            
+                            data = json.loads(text)
+                            
+                            # category가 note인 것만 처리
+                            if data.get('category') != 'note':
+                                continue
+                            
                             if '"content"' not in text:
                                 continue
-                                
-                            data = json.loads(text)
                             title = self.sanitize_filename(data.get("title", "untitled"))
                             html_content = data.get("content", "")
+                            attachments = data.get("attachment", {})
                             
                             if not html_content:
                                 continue
                             
-                            if use_pandoc:
-                                # Pandoc으로 Markdown 변환
-                                temp_html = output_dir / f"{title}_temp.html"
-                                md_file = output_dir / f"{title}.md"
-                                
-                                # 중복 파일명 처리
-                                counter = 1
-                                while md_file.exists():
-                                    md_file = output_dir / f"{title}_{counter}.md"
-                                    counter += 1
-                                
-                                with open(temp_html, "w", encoding="utf-8") as h:
-                                    h.write(html_content)
-                                
-                                result = subprocess.run(
-                                    ["pandoc", "-f", "html", "-t", "markdown", 
-                                     str(temp_html), "-o", str(md_file)],
-                                    capture_output=True,
-                                    text=True
-                                )
-                                
-                                temp_html.unlink()  # 임시 파일 삭제
-                                
-                                if result.returncode == 0:
-                                    self.log(f"✅ {title}.md")
-                                    note_count += 1
-                                else:
-                                    self.log(f"❌ {title}: Pandoc 변환 실패")
-                                    error_count += 1
-                            else:
-                                # HTML 파일로 저장
-                                html_file = output_dir / f"{title}.html"
-                                
-                                # 중복 파일명 처리
-                                counter = 1
-                                while html_file.exists():
-                                    html_file = output_dir / f"{title}_{counter}.html"
-                                    counter += 1
-                                
-                                with open(html_file, "w", encoding="utf-8") as h:
-                                    h.write(html_content)
-                                
-                                self.log(f"✅ {title}.html")
-                                note_count += 1
-                                
+                            # 이미지 경로 수정 (attachment 정보 전달)
+                            html_content = self.fix_image_paths(html_content, attachments)
+                            
+                            # HTML 파일로 저장
+                            html_file = output_dir / f"{title}.html"
+                            
+                            counter = 1
+                            while html_file.exists():
+                                html_file = output_dir / f"{title}_{counter}.html"
+                                counter += 1
+                            
+                            with open(html_file, "w", encoding="utf-8") as h:
+                                h.write(html_content)
+                            
+                            self.log(f"✅ {title}.html")
+                            note_count += 1
+                        
                         except json.JSONDecodeError:
                             continue
                         except Exception as e:
@@ -265,10 +341,11 @@ class NsxConverterGUI:
             
             # 결과 출력
             self.log("\n" + "="*50)
-            self.log(f"✅ 변환 완료!")
-            self.log(f"📊 성공: {note_count}개")
+            self.log(f"✅ 변환 완료! 성공: {note_count}개 노트")
+            if image_count > 0:
+                self.log(f"🖼️ 이미지: {image_count}개 (webman 폴더에 저장)")
             if error_count > 0:
-                self.log(f"⚠️  실패: {error_count}개")
+                self.log(f"⚠️ 실패: {error_count}개")
             self.log(f"📁 저장 위치: {output_dir.resolve()}")
             self.log("="*50)
             

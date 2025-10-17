@@ -1,6 +1,5 @@
 import os
 import json
-import subprocess
 import zipfile
 import shutil
 from pathlib import Path
@@ -66,20 +65,6 @@ class NSXConverter:
         return html_content
     
     @staticmethod
-    def check_pandoc():
-        """Pandoc 설치 확인"""
-        try:
-            result = subprocess.run(
-                ["pandoc", "--version"],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
-    
-    @staticmethod
     def sanitize_filename(name: str) -> str:
         """파일 이름으로 쓸 수 없는 문자 제거"""
         invalid = r'\/:*?"<>|'
@@ -113,13 +98,6 @@ class NSXConverter:
                 zip_ref.extractall(temp_dir)
             
             log("✅ 압축 해제 완료")
-            
-            # Pandoc 사용 가능 여부
-            use_pandoc = NSXConverter.check_pandoc()
-            if use_pandoc:
-                log("✅ Pandoc 발견 - Markdown으로 변환합니다.")
-            else:
-                log("⚠️ Pandoc 없음 - HTML 파일로 저장합니다.")
             
             # 이미지 폴더 구조 생성
             images_dir = output_dir / "webman" / "3rdparty" / "NoteStation" / "images"
@@ -237,46 +215,19 @@ class NSXConverter:
                             # 이미지 경로 수정 (attachment 정보 전달)
                             html_content = NSXConverter.fix_image_paths(html_content, attachments)
                             
-                            if use_pandoc:
-                                temp_html = output_dir / f"{title}_temp.html"
-                                md_file = output_dir / f"{title}.md"
-                                
-                                counter = 1
-                                while md_file.exists():
-                                    md_file = output_dir / f"{title}_{counter}.md"
-                                    counter += 1
-                                
-                                with open(temp_html, "w", encoding="utf-8") as h:
-                                    h.write(html_content)
-                                
-                                result = subprocess.run(
-                                    ["pandoc", "-f", "html", "-t", "markdown",
-                                     str(temp_html), "-o", str(md_file)],
-                                    capture_output=True,
-                                    text=True
-                                )
-                                
-                                temp_html.unlink()
-                                
-                                if result.returncode == 0:
-                                    log(f"✅ {title}.md")
-                                    note_count += 1
-                                else:
-                                    log(f"❌ {title}: Pandoc 변환 실패")
-                                    error_count += 1
-                            else:
-                                html_file = output_dir / f"{title}.html"
-                                
-                                counter = 1
-                                while html_file.exists():
-                                    html_file = output_dir / f"{title}_{counter}.html"
-                                    counter += 1
-                                
-                                with open(html_file, "w", encoding="utf-8") as h:
-                                    h.write(html_content)
-                                
-                                log(f"✅ {title}.html")
-                                note_count += 1
+                            # HTML 파일로 저장
+                            html_file = output_dir / f"{title}.html"
+                            
+                            counter = 1
+                            while html_file.exists():
+                                html_file = output_dir / f"{title}_{counter}.html"
+                                counter += 1
+                            
+                            with open(html_file, "w", encoding="utf-8") as h:
+                                h.write(html_content)
+                            
+                            log(f"✅ {title}.html")
+                            note_count += 1
                         
                         except json.JSONDecodeError:
                             continue
@@ -375,7 +326,7 @@ class WebGUIHandler(BaseHTTPRequestHandler):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NSX to Markdown 변환기</title>
+    <title>NSX to HTML 변환기</title>
     <style>
         * {
             margin: 0;
@@ -545,8 +496,8 @@ class WebGUIHandler(BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="container">
-        <h1>🗒️ NSX to Markdown</h1>
-        <p class="subtitle">Synology Note Station 백업 파일을 Markdown으로 변환</p>
+        <h1>🗒️ NSX to HTML</h1>
+        <p class="subtitle">Synology Note Station 백업 파일을 HTML로 변환</p>
         
         <div id="alert" class="alert"></div>
         
@@ -669,7 +620,7 @@ if __name__ == "__main__":
             sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
     
     print("="*60)
-    print("🗒️  Synology Note Station → Markdown 변환기 (Web GUI)")
+    print("🗒️  Synology Note Station → HTML 변환기 (Web GUI)")
     print("="*60)
     start_server()
 

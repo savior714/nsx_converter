@@ -1,6 +1,5 @@
 import os
 import json
-import subprocess
 import zipfile
 import shutil
 from pathlib import Path
@@ -35,22 +34,8 @@ def print_color(text, color=None):
 def print_header():
     """헤더 출력"""
     print("\n" + "="*60)
-    print_color("🗒️  Synology Note Station → Markdown 변환기", Fore.CYAN)
+    print_color("🗒️  Synology Note Station → HTML 변환기", Fore.CYAN)
     print("="*60 + "\n")
-
-
-def check_pandoc():
-    """Pandoc 설치 확인"""
-    try:
-        result = subprocess.run(
-            ["pandoc", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
 
 
 def sanitize_filename(name: str) -> str:
@@ -130,7 +115,7 @@ def get_file_path(prompt, must_exist=True):
 
 
 def convert_nsx(nsx_path, output_path):
-    """NSX 파일을 Markdown으로 변환"""
+    """NSX 파일을 HTML로 변환"""
     temp_dir = None
     
     try:
@@ -151,19 +136,12 @@ def convert_nsx(nsx_path, output_path):
             
         print_color("✅ 압축 해제 완료\n", Fore.GREEN)
         
-        # Pandoc 사용 가능 여부
-        use_pandoc = check_pandoc()
-        if use_pandoc:
-            print_color("✅ Pandoc 발견 - Markdown으로 변환합니다.\n", Fore.GREEN)
-        else:
-            print_color("⚠️  Pandoc 없음 - HTML 파일로 저장합니다.\n", Fore.YELLOW)
-        
         # 이미지 폴더 구조 생성
         images_dir = output_dir / "webman" / "3rdparty" / "NoteStation" / "images"
         images_dir.mkdir(parents=True, exist_ok=True)
         
-        # 이미지-md5 매핑 수집
-        image_mapping = {}  # {md5: {name, id}}
+        # 이미지-md5 매핑 수집 (같은 MD5에 여러 파일명 지원)
+        image_mapping = {}  # {md5: [names]}
         image_count = 0
         
         print_color("🖼️  이미지 정보 수집 중...", Fore.CYAN)
@@ -275,50 +253,20 @@ def convert_nsx(nsx_path, output_path):
                         # 이미지 경로 수정 (attachment 정보 전달)
                         html_content = fix_image_paths(html_content, attachments)
                         
-                        if use_pandoc:
-                            # Pandoc으로 Markdown 변환
-                            temp_html = output_dir / f"{title}_temp.html"
-                            md_file = output_dir / f"{title}.md"
-                            
-                            # 중복 파일명 처리
-                            counter = 1
-                            while md_file.exists():
-                                md_file = output_dir / f"{title}_{counter}.md"
-                                counter += 1
-                            
-                            with open(temp_html, "w", encoding="utf-8") as h:
-                                h.write(html_content)
-                            
-                            result = subprocess.run(
-                                ["pandoc", "-f", "html", "-t", "markdown", 
-                                 str(temp_html), "-o", str(md_file)],
-                                capture_output=True,
-                                text=True
-                            )
-                            
-                            temp_html.unlink()  # 임시 파일 삭제
-                            
-                            if result.returncode == 0:
-                                print_color(f"  ✅ {title}.md", Fore.GREEN)
-                                note_count += 1
-                            else:
-                                print_color(f"  ❌ {title}: Pandoc 변환 실패", Fore.RED)
-                                error_count += 1
-                        else:
-                            # HTML 파일로 저장
-                            html_file = output_dir / f"{title}.html"
-                            
-                            # 중복 파일명 처리
-                            counter = 1
-                            while html_file.exists():
-                                html_file = output_dir / f"{title}_{counter}.html"
-                                counter += 1
-                            
-                            with open(html_file, "w", encoding="utf-8") as h:
-                                h.write(html_content)
-                            
-                            print_color(f"  ✅ {title}.html", Fore.GREEN)
-                            note_count += 1
+                        # HTML 파일로 저장
+                        html_file = output_dir / f"{title}.html"
+                        
+                        # 중복 파일명 처리
+                        counter = 1
+                        while html_file.exists():
+                            html_file = output_dir / f"{title}_{counter}.html"
+                            counter += 1
+                        
+                        with open(html_file, "w", encoding="utf-8") as h:
+                            h.write(html_content)
+                        
+                        print_color(f"  ✅ {title}.html", Fore.GREEN)
+                        note_count += 1
                             
                     except json.JSONDecodeError:
                         continue
